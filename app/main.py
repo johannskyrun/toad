@@ -46,13 +46,11 @@ async def process(
     exclude_list = []
     if exclude.strip():
         try:
-            # prefer JSON array; fallback to comma list
             exclude_list = json.loads(exclude)
             if not isinstance(exclude_list, list):
                 raise ValueError
         except Exception:
             exclude_list = [c.strip() for c in exclude.split(",") if c.strip()]
-    # always exclude target from feature fitting
     if target not in exclude_list:
         exclude_list.append(target)
 
@@ -75,21 +73,20 @@ async def process(
     # transform train
     train_selected_bin = combiner.transform(train)
 
-    # ensure test has same columns as binned train
+    # align test
     shared_cols = train_selected_bin.columns.tolist()
     test_aligned = test[[c for c in shared_cols if c in test.columns]].copy()
-    # fill any missing columns from train_selected_bin structure
     for c in shared_cols:
         if c not in test_aligned.columns:
             test_aligned[c] = np.nan
     test_bin = combiner.transform(test_aligned)
 
-    # plots (optional)
+    # plotting
     tmpdir = tempfile.mkdtemp()
     plot_files = []
     if plot_feature and plot_feature in train_selected_bin.columns:
         try:
-            fig = bin_plot(train_selected_bin, x=plot_feature, target=target)
+            bin_plot(train_selected_bin, x=plot_feature, target=target)
             train_plot_path = os.path.join(tmpdir, f"bin_plot_train_{plot_feature}.png")
             plt.savefig(train_plot_path, bbox_inches="tight")
             plt.close()
@@ -97,7 +94,7 @@ async def process(
         except Exception:
             pass
         try:
-            fig = bin_plot(test_bin, x=plot_feature, target=target)
+            bin_plot(test_bin, x=plot_feature, target=target)
             test_plot_path = os.path.join(tmpdir, f"bin_plot_test_{plot_feature}.png")
             plt.savefig(test_plot_path, bbox_inches="tight")
             plt.close()
@@ -105,7 +102,7 @@ async def process(
         except Exception:
             pass
 
-    # WOE
+    # WOE transform
     woe = toad.transform.WOETransformer()
     train_woe = woe.fit_transform(
         X=train_selected_bin,
@@ -114,11 +111,12 @@ async def process(
     )
     test_woe = woe.transform(test_bin)
 
-    # save outputs
+    # save CSVs
     out_train_bin = os.path.join(tmpdir, "train_selected_bin.csv")
     out_test_bin  = os.path.join(tmpdir, "test_bin.csv")
     out_train_woe = os.path.join(tmpdir, "train_woe.csv")
     out_test_woe  = os.path.join(tmpdir, "test_woe.csv")
+
     train_selected_bin.to_csv(out_train_bin, index=False)
     test_bin.to_csv(out_test_bin, index=False)
     train_woe.to_csv(out_train_woe, index=False)
@@ -132,23 +130,20 @@ async def process(
     with open(woe_path, "wb") as f:
         pickle.dump(woe, f)
 
-    # zip
+    # zip results
     zip_path = os.path.join(tmpdir, "outputs.zip")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(out_train_bin, arcname="train_selected_bin.csv")
-        z.write(out_test_bin,  arcname="test_bin.csv")
-        z.write(out_train_woe, arcname="train_woe.csv")
-        z.write(out_test_woe,  arcname="test_woe.csv")
-        z.write(combiner_path, arcname="combiner.pkl")
-        z.write(woe_path,      arcname="woe.pkl")
+        for fpath in [out_train_bin, out_test_bin, out_train_woe, out_test_woe, combiner_path, woe_path]:
+            z.write(fpath, arcname=os.path.basename(fpath))
         for p in plot_files:
             z.write(p, arcname=os.path.basename(p))
 
     return FileResponse(zip_path, filename="outputs.zip", media_type="application/zip")
 
-import os
 
+# ✅ Entry point for Railway or local
 if __name__ == "__main__":
+    import uvicorn, os
     port = int(os.environ.get("PORT", 8000))
-    import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
+    # Note: when run with "python -m app.main", module path is just "main:app"
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
