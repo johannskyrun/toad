@@ -140,4 +140,13 @@ async def process(
 
     return FileResponse(zip_path, filename="outputs.zip", media_type="application/zip")
 
+    import os
+    import uvicorn
+
+    if __name__ == "__main__":
+        port = int(os.getenv("PORT", "8000"))
+        print(f"🚀 Starting FastAPI on port {port}", flush=True)
+        uvicorn.run("app.main:app", host="0.0.0.0", port=port)
+
+
 
