@@ -16,5 +16,4 @@ COPY app ./app
 ENV PORT=8000
 EXPOSE 8000
 
-# Read the real port from ENV inside Python. No shell expansion. No Procfile.
-CMD ["python", "-c", "import os, uvicorn; uvicorn.run('app.main:app', host='0.0.0.0', port=int(os.environ.get('PORT','8000')))"]
+CMD ["python", "-m", "app.main"]
