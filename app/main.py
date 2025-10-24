@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 import toad
 from toad.plot import bin_plot
+import uvicorn  # Keep this import for running the app
 
 app = FastAPI(title="Binning + WOE API", version="1.0")
 
@@ -84,69 +85,68 @@ async def process(
     # plotting
     tmpdir = tempfile.mkdtemp()
     plot_files = []
-    if plot_feature and plot_feature in train_selected_bin.columns:
-        try:
-            bin_plot(train_selected_bin, x=plot_feature, target=target)
-            train_plot_path = os.path.join(tmpdir, f"bin_plot_train_{plot_feature}.png")
-            plt.savefig(train_plot_path, bbox_inches="tight")
-            plt.close()
-            plot_files.append(train_plot_path)
-        except Exception:
-            pass
-        try:
-            bin_plot(test_bin, x=plot_feature, target=target)
-            test_plot_path = os.path.join(tmpdir, f"bin_plot_test_{plot_feature}.png")
-            plt.savefig(test_plot_path, bbox_inches="tight")
-            plt.close()
-            plot_files.append(test_plot_path)
-        except Exception:
-            pass
+    try:
+        if plot_feature and plot_feature in train_selected_bin.columns:
+            try:
+                bin_plot(train_selected_bin, x=plot_feature, target=target)
+                train_plot_path = os.path.join(tmpdir, f"bin_plot_train_{plot_feature}.png")
+                plt.savefig(train_plot_path, bbox_inches="tight")
+                plt.close()
+                plot_files.append(train_plot_path)
+            except Exception:
+                pass
+            try:
+                bin_plot(test_bin, x=plot_feature, target=target)
+                test_plot_path = os.path.join(tmpdir, f"bin_plot_test_{plot_feature}.png")
+                plt.savefig(test_plot_path, bbox_inches="tight")
+                plt.close()
+                plot_files.append(test_plot_path)
+            except Exception:
+                pass
 
-    # WOE transform
-    woe = toad.transform.WOETransformer()
-    train_woe = woe.fit_transform(
-        X=train_selected_bin,
-        y=train_selected_bin[target],
-        exclude=exclude_list
-    )
-    test_woe = woe.transform(test_bin)
+        # WOE transform
+        woe = toad.transform.WOETransformer()
+        train_woe = woe.fit_transform(
+            X=train_selected_bin,
+            y=train_selected_bin[target],
+            exclude=exclude_list
+        )
+        test_woe = woe.transform(test_bin)
 
-    # save CSVs
-    out_train_bin = os.path.join(tmpdir, "train_selected_bin.csv")
-    out_test_bin  = os.path.join(tmpdir, "test_bin.csv")
-    out_train_woe = os.path.join(tmpdir, "train_woe.csv")
-    out_test_woe  = os.path.join(tmpdir, "test_woe.csv")
+        # save CSVs
+        out_train_bin = os.path.join(tmpdir, "train_selected_bin.csv")
+        out_test_bin = os.path.join(tmpdir, "test_bin.csv")
+        out_train_woe = os.path.join(tmpdir, "train_woe.csv")
+        out_test_woe = os.path.join(tmpdir, "test_woe.csv")
 
-    train_selected_bin.to_csv(out_train_bin, index=False)
-    test_bin.to_csv(out_test_bin, index=False)
-    train_woe.to_csv(out_train_woe, index=False)
-    test_woe.to_csv(out_test_woe, index=False)
+        train_selected_bin.to_csv(out_train_bin, index=False)
+        test_bin.to_csv(out_test_bin, index=False)
+        train_woe.to_csv(out_train_woe, index=False)
+        test_woe.to_csv(out_test_woe, index=False)
 
-    # pickle artifacts
-    combiner_path = os.path.join(tmpdir, "combiner.pkl")
-    woe_path = os.path.join(tmpdir, "woe.pkl")
-    with open(combiner_path, "wb") as f:
-        pickle.dump(combiner, f)
-    with open(woe_path, "wb") as f:
-        pickle.dump(woe, f)
+        # pickle artifacts
+        combiner_path = os.path.join(tmpdir, "combiner.pkl")
+        woe_path = os.path.join(tmpdir, "woe.pkl")
+        with open(combiner_path, "wb") as f:
+            pickle.dump(combiner, f)
+        with open(woe_path, "wb") as f:
+            pickle.dump(woe, f)
 
-    # zip results
-    zip_path = os.path.join(tmpdir, "outputs.zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for fpath in [out_train_bin, out_test_bin, out_train_woe, out_test_woe, combiner_path, woe_path]:
-            z.write(fpath, arcname=os.path.basename(fpath))
-        for p in plot_files:
-            z.write(p, arcname=os.path.basename(p))
+        # zip results
+        zip_path = os.path.join(tmpdir, "outputs.zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for fpath in [out_train_bin, out_test_bin, out_train_woe, out_test_woe, combiner_path, woe_path]:
+                z.write(fpath, arcname=os.path.basename(fpath))
+            for p in plot_files:
+                z.write(p, arcname=os.path.basename(p))
 
-    return FileResponse(zip_path, filename="outputs.zip", media_type="application/zip")
+        return FileResponse(zip_path, filename="outputs.zip", media_type="application/zip")
+    finally:
+        # Clean up temporary directory and files
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
-    import os
-    import uvicorn
-
-    if __name__ == "__main__":
-        port = int(os.getenv("PORT", "8000"))
-        print(f"🚀 Starting FastAPI on port {port}", flush=True)
-        uvicorn.run("app.main:app", host="0.0.0.0", port=port)
-
-
-
+# Start Uvicorn when run as a module
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))  # Use Railway's PORT or fallback to 8000
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, log_level="info")
